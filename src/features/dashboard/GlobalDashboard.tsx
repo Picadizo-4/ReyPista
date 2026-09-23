@@ -1,7 +1,7 @@
 // src/features/dashboard/GlobalDashboard.tsx
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Trophy, Users, Plus, Trash2, ChevronRight, X, Award } from 'lucide-react';
+import { Users, Plus, Trash2, ChevronRight, X } from 'lucide-react';
 import { useTournaments } from '../tournaments/useTournaments';
 import { usePlayers } from '../players/usePlayers';
 import { Avatar } from '../../components/ui/Avatar';
