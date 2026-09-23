@@ -37,6 +37,11 @@ export const Layout = ({ children }: LayoutProps) => {
               <h1 className="text-base sm:text-xl font-bold tracking-tight text-gray-800 whitespace-nowrap uppercase">
                 REY DE LA PISTA
               </h1>
+              <img 
+                src="/logo.png" 
+                alt="Logo" 
+                className="h-7 w-auto object-contain flex-shrink-0" 
+              />
             </div>
           </div>
 
