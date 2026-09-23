@@ -18,7 +18,7 @@ export const Layout = ({ children }: LayoutProps) => {
         <div className="max-w-3xl mx-auto px-4 h-16 flex items-center justify-between relative">
           
           {/* Botón de retroceso a la izquierda (si no es Home) */}
-          <div className="flex items-center">
+          <div className="flex items-center z-20">
             {!isHome && (
               <Link to="/" className="p-2 -ml-2 rounded-full hover:bg-gray-100 transition-colors">
                 <ChevronLeft className="w-6 h-6 text-gray-600" />
@@ -26,25 +26,22 @@ export const Layout = ({ children }: LayoutProps) => {
             )}
           </div>
 
-          {/* Logo y Título Centrados */}
-          <div className="absolute left-1/2 transform -translate-x-1/2 flex items-center gap-2.5">
-            <img 
-              src="/logo.png" 
-              alt="Logo" 
-              className="h-8 object-contain" 
-            />
-            <h1 className="text-xl font-bold tracking-tight text-gray-800 uppercase">
-              REY DE LA PISTA
-            </h1>
-            <img 
-              src="/logo.png" 
-              alt="Logo" 
-              className="h-8 object-contain" 
-            />
+          {/* Logo y Título en una sola línea (whitespace-nowrap) */}
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none px-12">
+            <div className="flex items-center gap-2 pointer-events-auto">
+              <img 
+                src="/logo.png" 
+                alt="Logo" 
+                className="h-7 w-auto object-contain flex-shrink-0" 
+              />
+              <h1 className="text-base sm:text-xl font-bold tracking-tight text-gray-800 whitespace-nowrap uppercase">
+                REY DE LA PISTA
+              </h1>
+            </div>
           </div>
 
           {/* Espaciador derecho para equilibrar el flex */}
-          <div className="w-6"></div>
+          <div className="w-6 z-20"></div>
         </div>
       </header>
 
