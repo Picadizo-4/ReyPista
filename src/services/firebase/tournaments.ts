@@ -1,5 +1,5 @@
 // src/services/firebase/tournaments.ts
-import { collection, doc, setDoc, getDocs, getDoc, updateDoc, increment, writeBatch, query, where } from 'firebase/firestore';
+import { collection, doc, getDocs, getDoc, updateDoc, increment, writeBatch, query, where } from 'firebase/firestore';
 import { db } from './config';
 import type { Tournament } from '../../core/types';
 
