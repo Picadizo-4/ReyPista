@@ -1,5 +1,5 @@
 // src/services/firebase/matches.ts
-import { collection, doc, addDoc, getDocs, query, where, writeBatch, increment } from 'firebase/firestore';
+import { collection, doc, getDocs, query, where, writeBatch, increment } from 'firebase/firestore';
 import { db } from './config';
 
 const MATCHES_COLLECTION = 'matches';
@@ -41,13 +41,13 @@ export const registerMatch = async (
     const data = docSnap.data();
     if (data.playerId === winnerId) {
       batch.update(docSnap.ref, {
-        points: increment(3), // 3 puntos por victoria
+        points: increment(3),
         matchesPlayed: increment(1),
         setsWon: increment(winnerSets)
       });
     } else if (data.playerId === loserId) {
       batch.update(docSnap.ref, {
-        points: increment(pointsAwardedLoser), // Puntos al perdedor (ej: 1 si fue 2-1 o 3-2)
+        points: increment(pointsAwardedLoser),
         matchesPlayed: increment(1),
         setsWon: increment(loserSets)
       });
