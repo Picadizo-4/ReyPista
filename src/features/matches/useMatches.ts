@@ -1,10 +1,11 @@
 // src/features/matches/useMatches.ts
 import { useState } from 'react';
-import { registerMatch } from '../../services/firebase/matches';
+import { registerMatch, deleteLastMatchService } from '../../services/firebase/matches';
 import toast from 'react-hot-toast';
 
 export const useMatches = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const addMatch = async (
     tournamentId: string,
@@ -30,11 +31,25 @@ export const useMatches = () => {
     } catch (error) {
       toast.error("Error al registrar el partido");
       console.error(error);
-      throw error; // Lanzamos el error por si el componente visual necesita abortar alguna acción
+      throw error;
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  return { addMatch, isSubmitting };
+  const deleteLastMatch = async (tournamentId: string) => {
+    try {
+      setIsDeleting(true);
+      await deleteLastMatchService(tournamentId);
+      toast.success("Último partido borrado y estadísticas revertidas");
+    } catch (error: any) {
+      console.error("Error al borrar el último partido:", error);
+      toast.error(error.message || "Error al borrar el partido");
+      throw error;
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  return { addMatch, deleteLastMatch, isSubmitting, isDeleting };
 };

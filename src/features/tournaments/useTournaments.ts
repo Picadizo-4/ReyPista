@@ -53,3 +53,4 @@ export const useTournaments = () => {
 
   return { tournaments, isLoading, addTournament, deleteTournament, refreshTournaments: fetchTournaments };
 };
+

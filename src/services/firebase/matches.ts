@@ -1,7 +1,8 @@
 // src/services/firebase/matches.ts
-import { doc, collection, runTransaction, increment } from 'firebase/firestore';
+import { collection, doc, addDoc, getDocs, query, where, writeBatch, increment } from 'firebase/firestore';
 import { db } from './config';
-import type { Match, Player } from '../../core/types';
+
+const MATCHES_COLLECTION = 'matches';
 
 export const registerMatch = async (
   tournamentId: string,
@@ -11,74 +12,141 @@ export const registerMatch = async (
   winnerSets: number,
   loserSets: number,
   pointsAwardedLoser: number
-): Promise<void> => {
-  await runTransaction(db, async (transaction) => {
-    // 1. Preparamos todas las referencias a los documentos que vamos a tocar
-    const matchRef = doc(collection(db, 'matches'));
-    const globalWinnerRef = doc(db, 'players', winnerId);
-    const globalLoserRef = doc(db, 'players', loserId);
-    
-    // IDs compuestos para asegurar que un jugador tiene un único registro por torneo/temporada
-    const tWinnerRef = doc(db, 'tournamentPlayers', `${tournamentId}_${winnerId}`);
-    const tLoserRef = doc(db, 'tournamentPlayers', `${tournamentId}_${loserId}`);
-    const sWinnerRef = doc(db, 'seasonPlayers', `${tournamentId}_${seasonNumber}_${winnerId}`);
-    const sLoserRef = doc(db, 'seasonPlayers', `${tournamentId}_${seasonNumber}_${loserId}`);
+): Promise<string> => {
+  const batch = writeBatch(db);
 
-    // 2. Lecturas obligatorias (para calcular si el ganador ha superado su mejor racha histórica)
-    const globalWinnerSnap = await transaction.get(globalWinnerRef);
-    if (!globalWinnerSnap.exists()) throw new Error("Ganador no encontrado en la base global");
-    
-    const winnerData = globalWinnerSnap.data() as Player;
-    const newCurrentStreak = winnerData.currentStreak + 1;
-    const newBestStreak = Math.max(newCurrentStreak, winnerData.bestStreak);
+  // 1. Crear el documento del partido
+  const newMatchRef = doc(collection(db, MATCHES_COLLECTION));
+  const newMatch = {
+    tournamentId,
+    seasonNumber,
+    winnerId,
+    loserId,
+    winnerSets,
+    loserSets,
+    pointsAwardedLoser,
+    date: Date.now()
+  };
+  batch.set(newMatchRef, newMatch);
 
-    // 3. Escrituras atómicas
-    // A. Guardamos el registro del partido
-    transaction.set(matchRef, {
-      id: matchRef.id,
-      tournamentId,
-      seasonNumber,
-      date: Date.now(),
-      winnerId,
-      loserId,
-      winnerSets,
-      loserSets,
-      pointsAwardedWinner: 3, // Regla de negocio inmutable
-      pointsAwardedLoser
-    } as Match);
+  // 2. Actualizar / Sumar estadísticas en seasonPlayers (Temporada actual)
+  const spQuery = query(
+    collection(db, 'seasonPlayers'),
+    where('tournamentId', '==', tournamentId),
+    where('seasonNumber', '==', seasonNumber)
+  );
+  const spSnap = await getDocs(spQuery);
 
-    // B. Actualizamos Ranking Global (usamos increment para delegar el cálculo al servidor)
-    transaction.update(globalWinnerRef, {
-      totalPoints: increment(3),
-      totalMatches: increment(1),
-      totalSetsWon: increment(winnerSets),
-      currentStreak: newCurrentStreak,
-      bestStreak: newBestStreak
-    });
-
-    transaction.update(globalLoserRef, {
-      totalPoints: increment(pointsAwardedLoser),
-      totalMatches: increment(1),
-      totalSetsWon: increment(loserSets),
-      currentStreak: 0 // El perdedor rompe su racha
-    });
-
-    // C. Actualizamos Histórico del Torneo y Temporada Actual
-    // Usamos { merge: true } para que si es el primer partido que juegan, el documento 
-    // se cree automáticamente sin dar error, y si ya existe, solo sume los puntos.
-    const winnerStats = {
-      tournamentId, playerId: winnerId,
-      points: increment(3), matchesPlayed: increment(1), setsWon: increment(winnerSets)
-    };
-    
-    const loserStats = {
-      tournamentId, playerId: loserId,
-      points: increment(pointsAwardedLoser), matchesPlayed: increment(1), setsWon: increment(loserSets)
-    };
-
-    transaction.set(tWinnerRef, winnerStats, { merge: true });
-    transaction.set(tLoserRef, loserStats, { merge: true });
-    transaction.set(sWinnerRef, { ...winnerStats, seasonNumber }, { merge: true });
-    transaction.set(sLoserRef, { ...loserStats, seasonNumber }, { merge: true });
+  spSnap.docs.forEach((docSnap: any) => {
+    const data = docSnap.data();
+    if (data.playerId === winnerId) {
+      batch.update(docSnap.ref, {
+        points: increment(3), // 3 puntos por victoria
+        matchesPlayed: increment(1),
+        setsWon: increment(winnerSets)
+      });
+    } else if (data.playerId === loserId) {
+      batch.update(docSnap.ref, {
+        points: increment(pointsAwardedLoser), // Puntos al perdedor (ej: 1 si fue 2-1 o 3-2)
+        matchesPlayed: increment(1),
+        setsWon: increment(loserSets)
+      });
+    }
   });
+
+  // 3. Actualizar / Sumar estadísticas en tournamentPlayers (Histórico global)
+  const tpQuery = query(
+    collection(db, 'tournamentPlayers'),
+    where('tournamentId', '==', tournamentId)
+  );
+  const tpSnap = await getDocs(tpQuery);
+
+  tpSnap.docs.forEach((docSnap: any) => {
+    const data = docSnap.data();
+    if (data.playerId === winnerId) {
+      batch.update(docSnap.ref, {
+        points: increment(3),
+        matchesPlayed: increment(1),
+        setsWon: increment(winnerSets)
+      });
+    } else if (data.playerId === loserId) {
+      batch.update(docSnap.ref, {
+        points: increment(pointsAwardedLoser),
+        matchesPlayed: increment(1),
+        setsWon: increment(loserSets)
+      });
+    }
+  });
+
+  await batch.commit();
+  return newMatchRef.id;
+};
+
+export const deleteLastMatchService = async (tournamentId: string) => {
+  const matchesQuery = query(
+    collection(db, MATCHES_COLLECTION), 
+    where('tournamentId', '==', tournamentId)
+  );
+  const matchesSnap = await getDocs(matchesQuery);
+  if (matchesSnap.empty) throw new Error("No hay partidos registrados en este torneo.");
+
+  const matchesList = matchesSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+  matchesList.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const lastMatch = matchesList[0];
+
+  const batch = writeBatch(db);
+
+  // 1. Revertir estadísticas en seasonPlayers (Temporada actual)
+  const spQuery = query(
+    collection(db, 'seasonPlayers'),
+    where('tournamentId', '==', tournamentId),
+    where('seasonNumber', '==', lastMatch.seasonNumber)
+  );
+  const spSnap = await getDocs(spQuery);
+  
+  spSnap.docs.forEach((docSnap: any) => {
+    const data = docSnap.data();
+    if (data.playerId === lastMatch.winnerId) {
+      batch.update(docSnap.ref, {
+        points: increment(-3),
+        matchesPlayed: increment(-1),
+        setsWon: increment(-lastMatch.winnerSets)
+      });
+    } else if (data.playerId === lastMatch.loserId) {
+      batch.update(docSnap.ref, {
+        points: increment(-(lastMatch.pointsAwardedLoser || 0)),
+        matchesPlayed: increment(-1),
+        setsWon: increment(-lastMatch.loserSets)
+      });
+    }
+  });
+
+  // 2. Revertir estadísticas en tournamentPlayers (Histórico)
+  const tpQuery = query(
+    collection(db, 'tournamentPlayers'),
+    where('tournamentId', '==', tournamentId)
+  );
+  const tpSnap = await getDocs(tpQuery);
+
+  tpSnap.docs.forEach((docSnap: any) => {
+    const data = docSnap.data();
+    if (data.playerId === lastMatch.winnerId) {
+      batch.update(docSnap.ref, {
+        points: increment(-3),
+        matchesPlayed: increment(-1),
+        setsWon: increment(-lastMatch.winnerSets)
+      });
+    } else if (data.playerId === lastMatch.loserId) {
+      batch.update(docSnap.ref, {
+        points: increment(-(lastMatch.pointsAwardedLoser || 0)),
+        matchesPlayed: increment(-1),
+        setsWon: increment(-lastMatch.loserSets)
+      });
+    }
+  });
+
+  // 3. Borrar el documento del partido
+  batch.delete(doc(db, MATCHES_COLLECTION, lastMatch.id));
+
+  await batch.commit();
 };

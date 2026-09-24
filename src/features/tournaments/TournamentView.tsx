@@ -1,21 +1,25 @@
 // src/features/tournaments/TournamentView.tsx
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { Trophy, History, Swords, AlertCircle, Medal, CheckCircle2, X, Plus, RefreshCw, Settings, Award } from 'lucide-react';
+import { Trophy, History, Swords, AlertCircle, Medal, CheckCircle2, X, Plus, RefreshCw, Settings, Award, Calendar, TrendingUp, TrendingDown, Minus, Trash2 } from 'lucide-react';
 import { useTournamentDetail } from './useTournamentDetail';
 import { useMatches } from '../matches/useMatches';
 import { Avatar } from '../../components/ui/Avatar';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
+import { saveJornada, deleteLastJornada } from '../../services/firebase/tournaments';
+import toast from 'react-hot-toast';
 
 export const TournamentView = () => {
   const { id } = useParams<{ id: string }>();
   const { tournament, players, seasonRanking, historicalRanking, matches, seasonWinners, isLoading, refreshDetail, handleAdvanceSeason, handleUpdatePunishments, isAdvancing } = useTournamentDetail(id);
-  const { addMatch, isSubmitting } = useMatches();
+  const { addMatch, deleteLastMatch, isSubmitting, isDeleting } = useMatches();
 
-  const [activeTab, setActiveTab] = useState<'season' | 'historical' | 'matches' | 'palmares'>('season');
+  const [activeTab, setActiveTab] = useState<'season' | 'historical' | 'matches' | 'palmares' | 'jornadas'>('season');
   const [showMatchModal, setShowMatchModal] = useState(false);
   const [showSeasonModal, setShowSeasonModal] = useState(false);
   const [showPunishmentModal, setShowPunishmentModal] = useState(false);
+  const [showDeleteJornadaModal, setShowDeleteJornadaModal] = useState(false);
+  const [showDeleteMatchModal, setShowDeleteMatchModal] = useState(false); // <--- Estado para el modal de borrar partido
 
   // Estados formularios
   const [winnerId, setWinnerId] = useState('');
@@ -25,12 +29,44 @@ export const TournamentView = () => {
   const [editPunishLast, setEditPunishLast] = useState('');
   const [editPunishSecond, setEditPunishSecond] = useState('');
 
+  // Estados para la pestaña de Jornadas
+  const [selectedSeasonForJornadas, setSelectedSeasonForJornadas] = useState<number>(1);
+  const [selectedJornadaNumber, setSelectedJornadaNumber] = useState<number>(1);
+
+  // Declaraciones necesarias antes de los efectos para evitar errores de ámbito
+  const jornadasGuardadas = (tournament as any)?.jornadas || [];
+  const temporadasConJornadas = Array.from(new Set(jornadasGuardadas.map((j: any) => j.seasonNumber))) as number[];
+  if (tournament?.currentSeasonNumber && !temporadasConJornadas.includes(tournament.currentSeasonNumber)) {
+    temporadasConJornadas.push(tournament.currentSeasonNumber);
+  }
+  temporadasConJornadas.sort((a, b) => a - b);
+
+  const jornadasDeLaTemporadaSeleccionada = jornadasGuardadas
+    .filter((j: any) => j.seasonNumber === selectedSeasonForJornadas)
+    .sort((a: any, b: any) => a.jornadaNumber - b.jornadaNumber);
+
   useEffect(() => {
     if (tournament) {
       setEditPunishLast(tournament.punishmentLast || '');
       setEditPunishSecond(tournament.punishmentSecondToLast || '');
+      if (tournament.currentSeasonNumber && !selectedSeasonForJornadas) {
+        setSelectedSeasonForJornadas(tournament.currentSeasonNumber);
+      }
     }
   }, [tournament]);
+
+  // Auto-corregir la jornada seleccionada si la actual ya no existe (ej. al borrar la última)
+  useEffect(() => {
+    if (jornadasDeLaTemporadaSeleccionada.length > 0) {
+      const exists = jornadasDeLaTemporadaSeleccionada.some((j: any) => j.jornadaNumber === selectedJornadaNumber);
+      if (!exists) {
+        const ultimaDisponible = Math.max(...jornadasDeLaTemporadaSeleccionada.map((j: any) => j.jornadaNumber));
+        setSelectedJornadaNumber(ultimaDisponible);
+      }
+    } else {
+      setSelectedJornadaNumber(1);
+    }
+  }, [jornadasDeLaTemporadaSeleccionada, selectedJornadaNumber]);
 
   if (isLoading) return <div className="p-8 text-center text-gray-500 font-medium animate-pulse">Cargando torneo...</div>;
   if (!tournament) return <div className="p-8 text-center text-red-500 font-medium">Torneo no encontrado</div>;
@@ -73,6 +109,82 @@ export const TournamentView = () => {
     setShowPunishmentModal(false);
   };
 
+  const handleFinalizeJornada = async () => {
+    const jornadasActuales = (tournament as any).jornadas || [];
+    const temporadaActualNum = tournament.currentSeasonNumber;
+    
+    const jornadasDeEstaTemp = jornadasActuales.filter((j: any) => j.seasonNumber === temporadaActualNum);
+
+    const nuevoRankingActual = seasonRanking.map((p, idx) => ({
+      playerId: p.playerId,
+      points: Number(p.points || 0),
+      matchesPlayed: Number(p.matchesPlayed || 0),
+      setsWon: Number(p.setsWon || 0),
+      position: idx + 1
+    }));
+
+    if (jornadasDeEstaTemp.length > 0) {
+      const jornadasOrdenadas = [...jornadasDeEstaTemp].sort((a: any, b: any) => b.jornadaNumber - a.jornadaNumber);
+      const ultimaJornadaRegistrada = jornadasOrdenadas[0];
+
+      const rankingAnterior = ultimaJornadaRegistrada.ranking || [];
+      
+      const esIgual = rankingAnterior.length === nuevoRankingActual.length && rankingAnterior.every((item: any, index: number) => {
+        const actual = nuevoRankingActual[index];
+        return item.playerId === actual.playerId && item.points === actual.points && item.position === actual.position;
+      });
+
+      if (esIgual) {
+        toast.error(`La clasificación es idéntica a la de la Jornada ${ultimaJornadaRegistrada.jornadaNumber}. No hay cambios que registrar.`);
+        return;
+      }
+    }
+
+    const siguienteNumJornada = jornadasDeEstaTemp.length + 1;
+
+    const nuevaJornada = {
+      id: `${temporadaActualNum}-${siguienteNumJornada}-${Date.now()}`,
+      seasonNumber: temporadaActualNum,
+      jornadaNumber: siguienteNumJornada,
+      date: new Date().toISOString(),
+      ranking: nuevoRankingActual
+    };
+
+    try {
+      await saveJornada(tournament.id, nuevaJornada);
+      setSelectedSeasonForJornadas(temporadaActualNum);
+      setSelectedJornadaNumber(siguienteNumJornada);
+      toast.success(`¡Jornada ${siguienteNumJornada} registrada con éxito!`);
+      refreshDetail();
+    } catch (error) {
+      console.error('Error al registrar jornada:', error);
+      toast.error('Hubo un error al registrar la jornada.');
+    }
+  };
+
+  const handleDeleteLatestJornada = async () => {
+    try {
+      await deleteLastJornada(tournament.id);
+      toast.success('Se ha eliminado la última jornada registrada.');
+      setShowDeleteJornadaModal(false);
+      refreshDetail();
+    } catch (error) {
+      console.error('Error al borrar jornada:', error);
+      toast.error('Hubo un error al eliminar la jornada.');
+    }
+  };
+
+  // Función para manejar el borrado del último partido desde el modal personalizado
+  const handleDeleteLatestMatch = async () => {
+    try {
+      await deleteLastMatch(tournament.id);
+      setShowDeleteMatchModal(false);
+      refreshDetail();
+    } catch (error) {
+      console.error('Error al borrar partido:', error);
+    }
+  };
+
   return (
     <div className="space-y-6 pb-10">
       {/* CABECERA DEL TORNEO */}
@@ -90,16 +202,19 @@ export const TournamentView = () => {
 
       {/* NAVEGACIÓN POR PESTAÑAS */}
       <div className="flex bg-gray-200 p-1 rounded-xl gap-1 overflow-x-auto">
-        <button onClick={() => setActiveTab('season')} className={`flex-1 min-w-[90px] flex items-center justify-center gap-2 py-2.5 text-xs sm:text-sm font-semibold rounded-lg transition-all ${activeTab === 'season' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
+        <button onClick={() => setActiveTab('season')} className={`flex-1 min-w-[80px] flex items-center justify-center gap-1.5 py-2.5 text-xs sm:text-sm font-semibold rounded-lg transition-all ${activeTab === 'season' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
           <Medal className="w-4 h-4" /> Temporada
         </button>
-        <button onClick={() => setActiveTab('historical')} className={`flex-1 min-w-[90px] flex items-center justify-center gap-2 py-2.5 text-xs sm:text-sm font-semibold rounded-lg transition-all ${activeTab === 'historical' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
+        <button onClick={() => setActiveTab('jornadas')} className={`flex-1 min-w-[80px] flex items-center justify-center gap-1.5 py-2.5 text-xs sm:text-sm font-semibold rounded-lg transition-all ${activeTab === 'jornadas' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
+          <Calendar className="w-4 h-4" /> Jornadas
+        </button>
+        <button onClick={() => setActiveTab('historical')} className={`flex-1 min-w-[80px] flex items-center justify-center gap-1.5 py-2.5 text-xs sm:text-sm font-semibold rounded-lg transition-all ${activeTab === 'historical' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
           <History className="w-4 h-4" /> Histórico
         </button>
-        <button onClick={() => setActiveTab('matches')} className={`flex-1 min-w-[90px] flex items-center justify-center gap-2 py-2.5 text-xs sm:text-sm font-semibold rounded-lg transition-all ${activeTab === 'matches' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
+        <button onClick={() => setActiveTab('matches')} className={`flex-1 min-w-[80px] flex items-center justify-center gap-1.5 py-2.5 text-xs sm:text-sm font-semibold rounded-lg transition-all ${activeTab === 'matches' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
           <Swords className="w-4 h-4" /> Partidos
         </button>
-        <button onClick={() => setActiveTab('palmares')} className={`flex-1 min-w-[90px] flex items-center justify-center gap-2 py-2.5 text-xs sm:text-sm font-semibold rounded-lg transition-all ${activeTab === 'palmares' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
+        <button onClick={() => setActiveTab('palmares')} className={`flex-1 min-w-[80px] flex items-center justify-center gap-1.5 py-2.5 text-xs sm:text-sm font-semibold rounded-lg transition-all ${activeTab === 'palmares' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
           <Award className="w-4 h-4" /> Palmarés
         </button>
       </div>
@@ -107,19 +222,28 @@ export const TournamentView = () => {
       {/* CONTENIDO: TEMPORADA ACTUAL */}
       {activeTab === 'season' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <button 
-              onClick={() => setShowSeasonModal(true)}
-              disabled={isAdvancing}
-              className="text-gray-500 bg-white border border-gray-200 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 hover:text-gray-800 transition-colors flex items-center gap-2 disabled:opacity-50 shadow-sm"
-            >
-              <RefreshCw className={`w-4 h-4 ${isAdvancing ? 'animate-spin' : ''}`} /> 
-              Cerrar Temp. {tournament.currentSeasonNumber}
-            </button>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => setShowSeasonModal(true)}
+                disabled={isAdvancing}
+                className="text-gray-500 bg-white border border-gray-200 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-gray-50 hover:text-gray-800 transition-colors flex items-center gap-2 disabled:opacity-50 shadow-sm"
+              >
+                <RefreshCw className={`w-4 h-4 ${isAdvancing ? 'animate-spin' : ''}`} /> 
+                Cerrar Temp. {tournament.currentSeasonNumber}
+              </button>
+
+              <button 
+                onClick={handleFinalizeJornada}
+                className="text-blue-600 bg-blue-50 border border-blue-200 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold hover:bg-blue-100 transition-colors flex items-center gap-2 shadow-sm"
+              >
+                <Calendar className="w-4 h-4" /> Finalizar Jornada
+              </button>
+            </div>
 
             <button 
               onClick={() => setShowMatchModal(true)}
-              className="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-black flex items-center gap-2 shadow-sm transition-colors"
+              className="bg-gray-900 text-white px-4 py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-black flex items-center gap-2 shadow-sm transition-colors"
             >
               <Plus className="w-4 h-4" /> Registrar Partido
             </button>
@@ -188,6 +312,144 @@ export const TournamentView = () => {
         </div>
       )}
 
+      {/* CONTENIDO: NUEVA PESTAÑA JORNADAS */}
+      {activeTab === 'jornadas' && (
+        <div className="space-y-6">
+          <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col sm:flex-row gap-4 items-end">
+            <div className="flex-1 w-full">
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Temporada</label>
+              <select 
+                value={selectedSeasonForJornadas} 
+                onChange={(e) => {
+                  const sNum = Number(e.target.value);
+                  setSelectedSeasonForJornadas(sNum);
+                  const jList = jornadasGuardadas.filter((j: any) => j.seasonNumber === sNum);
+                  if (jList.length > 0) {
+                    setSelectedJornadaNumber(jList[0].jornadaNumber);
+                  } else {
+                    setSelectedJornadaNumber(1);
+                  }
+                }}
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-sm font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-900"
+              >
+                {temporadasConJornadas.map(sNum => (
+                  <option key={`temp-${sNum}`} value={sNum}>Temporada {sNum}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex-1 w-full">
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Jornada</label>
+              <select 
+                value={selectedJornadaNumber} 
+                onChange={(e) => setSelectedJornadaNumber(Number(e.target.value))}
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-sm font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-900"
+                disabled={jornadasDeLaTemporadaSeleccionada.length === 0}
+              >
+                {jornadasDeLaTemporadaSeleccionada.length === 0 ? (
+                  <option value="">No hay jornadas guardadas</option>
+                ) : (
+                  jornadasDeLaTemporadaSeleccionada.map((j: any) => (
+                    <option key={`jor-${j.jornadaNumber}`} value={j.jornadaNumber}>Jornada {j.jornadaNumber}</option>
+                  ))
+                )}
+              </select>
+            </div>
+
+            {jornadasGuardadas.length > 0 && (
+              <button
+                onClick={() => setShowDeleteJornadaModal(true)}
+                className="bg-red-50 text-red-600 border border-red-200 px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-red-100 transition-colors flex items-center gap-1.5 shrink-0 shadow-sm"
+                title="Eliminar última jornada registrada"
+              >
+                <Trash2 className="w-4 h-4" /> Borrar última
+              </button>
+            )}
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="p-4 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-gray-800">Clasificación - Temp. {selectedSeasonForJornadas} • Jornada {selectedJornadaNumber}</h3>
+                {(() => {
+                  const currentJornadaObj = jornadasDeLaTemporadaSeleccionada.find((j: any) => j.jornadaNumber === selectedJornadaNumber);
+                  if (currentJornadaObj?.date) {
+                    return <span className="text-xs text-gray-400">Registrada el {new Date(currentJornadaObj.date).toLocaleDateString()}</span>;
+                  }
+                  return null;
+                })()}
+              </div>
+              <span className="text-xs text-gray-500 bg-gray-200/60 px-2.5 py-1 rounded-full font-medium">Histórico Oficial</span>
+            </div>
+
+            {(() => {
+              const currentJornadaObj = jornadasDeLaTemporadaSeleccionada.find((j: any) => j.jornadaNumber === selectedJornadaNumber);
+              if (!currentJornadaObj || !currentJornadaObj.ranking || currentJornadaObj.ranking.length === 0) {
+                return <div className="p-8 text-center text-gray-500 text-sm">No hay datos registrados para esta jornada. Pulsa en "Finalizar Jornada" en la pestaña Temporada para guardar una instantánea.</div>;
+              }
+
+              const indexActualJornada = jornadasDeLaTemporadaSeleccionada.findIndex((j: any) => j.jornadaNumber === selectedJornadaNumber);
+              const previousJornadaObj = indexActualJornada > 0 ? jornadasDeLaTemporadaSeleccionada[indexActualJornada - 1] : null;
+
+              return (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left whitespace-nowrap">
+                    <thead className="bg-gray-50 text-gray-500 font-medium border-b border-gray-100 text-xs sm:text-sm">
+                      <tr>
+                        <th className="px-2 sm:px-4 py-3 w-16 text-center">#</th>
+                        <th className="px-2 sm:px-4 py-3">Jugador</th>
+                        <th className="px-2 sm:px-4 py-3 text-center" title="Puntos">Pts</th>
+                        <th className="px-2 sm:px-4 py-3 text-center" title="Partidos Jugados">PJ</th>
+                        <th className="px-2 sm:px-4 py-3 text-center" title="Sets Ganados">Sets</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {currentJornadaObj.ranking.map((row: any) => {
+                        const playerInfo = getPlayer(row.playerId);
+                        
+                        let trendIcon = null;
+                        if (previousJornadaObj && previousJornadaObj.ranking) {
+                          const prevRow = previousJornadaObj.ranking.find((r: any) => r.playerId === row.playerId);
+                          if (prevRow) {
+                            if (row.position < prevRow.position) {
+                              trendIcon = <span title="Sube posiciones"><TrendingUp className="w-4 h-4 text-green-600 inline ml-1" /></span>;
+                            } else if (row.position > prevRow.position) {
+                              trendIcon = <span title="Baja posiciones"><TrendingDown className="w-4 h-4 text-red-600 inline ml-1" /></span>;
+                            } else {
+                              trendIcon = <span title="Mantiene posición"><Minus className="w-4 h-4 text-amber-500 inline ml-1" /></span>;
+                            }
+                          }
+                        }
+
+                        return (
+                          <tr key={row.playerId} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-2 sm:px-4 py-4 text-center font-semibold text-gray-700">
+                              <div className="flex items-center justify-center gap-1">
+                                <span>{row.position}</span>
+                                {trendIcon}
+                              </div>
+                            </td>
+                            <td className="px-2 sm:px-4 py-4 min-w-[120px]">
+                              <div className="flex items-center gap-2 sm:gap-3">
+                                <Avatar url={playerInfo?.avatarUrl || null} name={playerInfo?.name || 'Desconocido'} size="sm" />
+                                <span className="font-medium text-gray-900 truncate">{playerInfo?.name || 'Jugador'}</span>
+                              </div>
+                            </td>
+                            <td className="px-2 sm:px-4 py-4 text-center font-bold text-blue-600 text-base">{row.points}</td>
+                            <td className="px-2 sm:px-4 py-4 text-center text-gray-500">{row.matchesPlayed}</td>
+                            <td className="px-2 sm:px-4 py-4 text-center text-gray-500">{row.setsWon}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
       {/* CONTENIDO: HISTÓRICO */}
       {activeTab === 'historical' && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -232,56 +494,84 @@ export const TournamentView = () => {
 
       {/* CONTENIDO: HISTORIAL DE PARTIDOS */}
       {activeTab === 'matches' && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="divide-y divide-gray-50">
-            {matches.length === 0 ? (
-              <div className="p-8 text-center text-gray-500 text-sm">No se han registrado partidos aún.</div>
-            ) : (
-              matches.map((m, index) => {
-                const winner = getPlayer(m.winnerId);
-                const loser = getPlayer(m.loserId);
-                
-                const isFirstMatch = index === 0;
-                const isDifferentSeason = !isFirstMatch && m.seasonNumber !== matches[index - 1].seasonNumber;
-                const showSeasonHeader = isFirstMatch || isDifferentSeason;
+        <div className="space-y-4">
+          {matches.length > 0 && (
+            <div className="flex justify-end">
+              <button
+                onClick={() => setShowDeleteMatchModal(true)}
+                disabled={isDeleting}
+                className="bg-red-50 text-red-600 border border-red-200 px-3.5 py-2 rounded-xl text-xs font-semibold hover:bg-red-100 transition-colors flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+              >
+                <Trash2 className="w-4 h-4" /> {isDeleting ? 'Borrando...' : 'Borrar último partido'}
+              </button>
+            </div>
+          )}
 
-                return (
-                  <div key={m.id}>
-                    {showSeasonHeader && (
-                      <div className="bg-gray-50/80 px-4 py-2 border-y border-gray-100 flex items-center justify-center gap-2">
-                        <div className="h-px bg-gray-200 flex-1"></div>
-                        <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-                         Temporada  {m.seasonNumber}
-                        </span>
-                        <div className="h-px bg-gray-200 flex-1"></div>
-                      </div>
-                    )}
-                    
-                    <div className="p-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
-                      <div className="flex flex-col gap-1">
-                        <span className="font-medium text-green-700 text-sm flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3" /> {winner?.name}
-                        </span>
-                        <span className="text-gray-500 text-sm ml-4">{loser?.name}</span>
-                      </div>
-                      <div className="text-right">
-                        <span className="font-bold text-gray-800 bg-gray-100 px-2 py-1 rounded text-sm tracking-widest">
-                          {m.winnerSets}-{m.loserSets}
-                        </span>
-                        <div className="text-xs text-gray-400 mt-1">
-                          {new Date(m.date).toLocaleDateString()}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="divide-y divide-gray-50">
+              {matches.length === 0 ? (
+                <div className="p-8 text-center text-gray-500 text-sm">No se han registrado partidos aún.</div>
+              ) : (
+                matches.map((m, index) => {
+                  const winner = getPlayer(m.winnerId);
+                  const loser = getPlayer(m.loserId);
+                  
+                  const isFirstMatch = index === 0;
+                  const isDifferentSeason = !isFirstMatch && m.seasonNumber !== matches[index - 1].seasonNumber;
+                  const showSeasonHeader = isFirstMatch || isDifferentSeason;
+
+                  const matchDateStr = new Date(m.date).toLocaleDateString();
+                  const prevMatchDateStr = !isFirstMatch ? new Date(matches[index - 1].date).toLocaleDateString() : null;
+                  const showDayHeader = !isFirstMatch && !isDifferentSeason && matchDateStr !== prevMatchDateStr;
+
+                  return (
+                    <div key={m.id}>
+                      {showSeasonHeader && (
+                        <div className="bg-gray-100/80 px-4 py-2.5 border-y border-gray-200 flex items-center justify-center gap-2">
+                          <div className="h-px bg-gray-300 flex-1"></div>
+                          <span className="text-xs font-bold text-gray-600 uppercase tracking-wider">
+                            Temporada {m.seasonNumber}
+                          </span>
+                          <div className="h-px bg-gray-300 flex-1"></div>
+                        </div>
+                      )}
+
+                      {showDayHeader && (
+                        <div className="bg-gray-50 px-4 py-1.5 flex items-center justify-center gap-2">
+                          <div className="h-px bg-gray-200 flex-1"></div>
+                          <span className="text-[11px] font-medium text-gray-400">
+                            Jornada / {matchDateStr}
+                          </span>
+                          <div className="h-px bg-gray-200 flex-1"></div>
+                        </div>
+                      )}
+                      
+                      <div className="p-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
+                        <div className="flex flex-col gap-1">
+                          <span className="font-medium text-green-700 text-sm flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" /> {winner?.name}
+                          </span>
+                          <span className="text-gray-500 text-sm ml-4">{loser?.name}</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="font-bold text-gray-800 bg-gray-100 px-2 py-1 rounded text-sm tracking-widest">
+                            {m.winnerSets}-{m.loserSets}
+                          </span>
+                          <div className="text-xs text-gray-400 mt-1">
+                            {matchDateStr}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })
-            )}
+                  );
+                })
+              )}
+            </div>
           </div>
         </div>
       )}
 
-      {/* CONTENIDO: PALMARÉS (GANADORES DE TEMPORADAS ANTERIORES) */}
+      {/* CONTENIDO: PALMARÉS */}
       {activeTab === 'palmares' && (
         <div className="space-y-3">
           {seasonWinners.length === 0 ? (
@@ -387,6 +677,28 @@ export const TournamentView = () => {
           </div>
         </div>
       )}
+
+      {/* MODAL: CONFIRMAR BORRADO DE PARTIDO */}
+      <ConfirmModal
+        isOpen={showDeleteMatchModal}
+        title="¿Borrar el último partido?"
+        message="Esta acción eliminará permanentemente el último partido registrado y revertirá los puntos y estadísticas asociadas. ¿Estás seguro?"
+        confirmText="Sí, borrar partido"
+        isDangerous={true}
+        onConfirm={handleDeleteLatestMatch}
+        onClose={() => setShowDeleteMatchModal(false)}
+      />
+
+      {/* MODAL: CONFIRMAR BORRADO DE JORNADA */}
+      <ConfirmModal
+        isOpen={showDeleteJornadaModal}
+        title="¿Eliminar la última jornada?"
+        message="Esta acción borrará permanentemente la última jornada registrada y restaurará el estado anterior. ¿Estás seguro?"
+        confirmText="Sí, eliminar"
+        isDangerous={true}
+        onConfirm={handleDeleteLatestJornada}
+        onClose={() => setShowDeleteJornadaModal(false)}
+      />
 
       {/* MODAL: CONFIRMAR CIERRE DE TEMPORADA */}
       <ConfirmModal

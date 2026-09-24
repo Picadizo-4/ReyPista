@@ -1,5 +1,5 @@
 // src/services/firebase/tournaments.ts
-import { collection, doc, setDoc, getDocs, updateDoc, increment, writeBatch, query, where } from 'firebase/firestore';
+import { collection, doc, setDoc, getDocs, getDoc, updateDoc, increment, writeBatch, query, where } from 'firebase/firestore';
 import { db } from './config';
 import type { Tournament } from '../../core/types';
 
@@ -85,4 +85,46 @@ export const updatePunishments = async (
     punishmentLast,
     punishmentSecondToLast
   });
+};
+
+export const saveJornada = async (tournamentId: string, nuevaJornada: any) => {
+  const tournamentRef = doc(db, 'tournaments', tournamentId);
+  const tournamentSnap = await getDoc(tournamentRef);
+  if (!tournamentSnap.exists()) throw new Error("Torneo no encontrado");
+  
+  const currentJornadas = tournamentSnap.data().jornadas || [];
+  const updatedJornadas = [...currentJornadas, nuevaJornada];
+  
+  await updateDoc(tournamentRef, { jornadas: updatedJornadas });
+};
+
+export const deleteLastJornada = async (tournamentId: string) => {
+  const tournamentRef = doc(db, TOURNAMENTS_COLLECTION, tournamentId);
+  const tournamentSnap = await getDoc(tournamentRef);
+  if (!tournamentSnap.exists()) throw new Error("Torneo no encontrado");
+  
+  const data = tournamentSnap.data();
+  const currentJornadas = data.jornadas || [];
+  if (currentJornadas.length === 0) return;
+
+  // Ordenamos de forma segura por fecha o número para identificar la última absoluta
+  currentJornadas.sort((a: any, b: any) => {
+    if (a.seasonNumber !== b.seasonNumber) {
+      return b.seasonNumber - a.seasonNumber;
+    }
+    return b.jornadaNumber - a.jornadaNumber;
+  });
+
+  // Eliminamos estrictamente el primer elemento tras ordenar (que es el más reciente de todos)
+  currentJornadas.shift();
+
+  // Volvemos a ordenarlas cronológicamente para que se queden en orden correcto en la base de datos
+  currentJornadas.sort((a: any, b: any) => {
+    if (a.seasonNumber !== b.seasonNumber) {
+      return a.seasonNumber - b.seasonNumber;
+    }
+    return a.jornadaNumber - b.jornadaNumber;
+  });
+  
+  await updateDoc(tournamentRef, { jornadas: currentJornadas });
 };
