@@ -1,14 +1,19 @@
 // src/components/ui/PlayerModal.tsx
-import { useState, useEffect } from 'react';
-import { X, Trophy, Swords, Percent, Award, Flame } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { X, Trophy, Swords, Percent, Award, Flame, Camera } from 'lucide-react';
 import { Avatar } from './Avatar';
 import { getPlayerDetailedStats, type PlayerStats } from '../../services/firebase/queries';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '../../services/firebase/config';
+import { convertImageToBase64 } from '../../utils/imageUtils';
 import type { Player } from '../../core/types';
+import toast from 'react-hot-toast';
 
 interface PlayerModalProps {
   player: Player | null;
   isOpen: boolean;
   onClose: () => void;
+  onPlayerUpdated?: (playerId: string, newAvatarUrl: string) => void;
 }
 
 // Función para determinar el rango según las victorias
@@ -20,12 +25,16 @@ const getPlayerRank = (wins: number) => {
   return { label: 'Principiante en la Pista', color: 'bg-green-100 text-green-700 border-green-200' };
 };
 
-export const PlayerModal = ({ player, isOpen, onClose }: PlayerModalProps) => {
+export const PlayerModal = ({ player, isOpen, onClose, onPlayerUpdated }: PlayerModalProps) => {
   const [stats, setStats] = useState<PlayerStats | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [currentAvatar, setCurrentAvatar] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (isOpen && player) {
+      setCurrentAvatar(player.avatarUrl);
       setIsLoading(true);
       getPlayerDetailedStats(player.id)
         .then(data => setStats(data))
@@ -35,6 +44,35 @@ export const PlayerModal = ({ player, isOpen, onClose }: PlayerModalProps) => {
   }, [isOpen, player]);
 
   if (!isOpen || !player) return null;
+
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsUploading(true);
+      const base64String = await convertImageToBase64(file);
+      
+      const playerRef = doc(db, 'players', player.id);
+      await updateDoc(playerRef, { avatarUrl: base64String });
+
+      setCurrentAvatar(base64String);
+      toast.success("¡Foto de perfil actualizada con éxito!");
+      
+      // Enviamos el ID y el nuevo avatar al componente padre al momento
+      if (onPlayerUpdated) {
+        onPlayerUpdated(player.id, base64String);
+      }
+    } catch (error: any) {
+      if (error.message !== "FILE_TOO_LARGE") {
+        console.error("Error al actualizar la foto:", error);
+        toast.error("Hubo un error al subir la imagen.");
+      }
+    } finally {
+      setIsUploading(false);
+      if (e.target) e.target.value = '';
+    }
+  };
 
   const rank = getPlayerRank(stats?.totalWins || 0);
 
@@ -49,12 +87,33 @@ export const PlayerModal = ({ player, isOpen, onClose }: PlayerModalProps) => {
           <X className="w-5 h-5" />
         </button>
 
-        {/* Cabecera con Avatar Gigante */}
+        {/* Cabecera con Avatar Interactivo */}
         <div className="bg-gradient-to-b from-blue-50 to-white p-6 pb-4 flex flex-col items-center text-center border-b border-gray-100">
-          <div className="mb-3 transform scale-150">
-            <Avatar url={player.avatarUrl} name={player.name} size="lg" />
+          
+          {/* Contenedor del Avatar con botón flotante de cámara */}
+          <div className="relative group cursor-pointer mb-2" onClick={() => fileInputRef.current?.click()} title="Cambiar foto de perfil">
+            <div className={`transform scale-125 transition-opacity ${isUploading ? 'opacity-50' : 'group-hover:opacity-90'}`}>
+              <Avatar url={currentAvatar} name={player.name} size="lg" />
+            </div>
+            
+            {/* Overlay con icono de cámara */}
+            <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-full opacity-0 group-hover:opacity-100 transition-opacity transform scale-125">
+              <Camera className="w-5 h-5 text-white" />
+            </div>
+
+            {/* Input file oculto */}
+            <input 
+              ref={fileInputRef}
+              type="file" 
+              accept="image/*" 
+              className="hidden" 
+              onChange={handleImageChange}
+            />
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 mt-2">{player.name}</h2>
+
+          <span className="text-[10px] text-gray-400 mt-1 mb-1">Pulsa sobre la imagen para cambiar la foto</span>
+
+          <h2 className="text-2xl font-bold text-gray-900 mt-1">{player.name}</h2>
           
           {/* Rango Dinámico */}
           <div className={`text-xs font-bold px-3 py-1 rounded-full mt-2 border shadow-sm transition-all ${rank.color}`}>
@@ -63,7 +122,7 @@ export const PlayerModal = ({ player, isOpen, onClose }: PlayerModalProps) => {
         </div>
 
         {/* Contenido con Estadísticas */}
-        <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+        <div className="p-6 space-y-6 max-h-[60vh] overflow-y-auto">
           {isLoading ? (
             <div className="py-8 text-center text-gray-400 text-sm animate-pulse">Calculando estadísticas...</div>
           ) : (

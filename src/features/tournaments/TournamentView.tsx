@@ -6,6 +6,7 @@ import { useTournamentDetail } from './useTournamentDetail';
 import { useMatches } from '../matches/useMatches';
 import { Avatar } from '../../components/ui/Avatar';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
+import { PlayerModal } from '../../components/ui/PlayerModal';
 import { saveJornada, deleteLastJornada } from '../../services/firebase/tournaments';
 import toast from 'react-hot-toast';
 
@@ -20,6 +21,10 @@ export const TournamentView = () => {
   const [showPunishmentModal, setShowPunishmentModal] = useState(false);
   const [showDeleteJornadaModal, setShowDeleteJornadaModal] = useState(false);
   const [showDeleteMatchModal, setShowDeleteMatchModal] = useState(false);
+
+  // Estado para controlar el modal de perfil de jugador
+  const [selectedPlayer, setSelectedPlayer] = useState<any | null>(null);
+  const [isPlayerModalOpen, setIsPlayerModalOpen] = useState(false);
 
   // Estados formularios
   const [winnerId, setWinnerId] = useState('');
@@ -182,6 +187,14 @@ export const TournamentView = () => {
     }
   };
 
+  const openPlayerProfile = (pId: string) => {
+    const found = getPlayer(pId);
+    if (found) {
+      setSelectedPlayer(found);
+      setIsPlayerModalOpen(true);
+    }
+  };
+
   return (
     <div className="space-y-6 pb-10">
       {/* CABECERA DEL TORNEO */}
@@ -264,7 +277,7 @@ export const TournamentView = () => {
                       const punishment = isLast ? tournament.punishmentLast : isSecondToLast ? tournament.punishmentSecondToLast : null;
 
                       return (
-                        <tr key={p.playerId} className="hover:bg-gray-50 transition-colors">
+                        <tr key={p.playerId} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => openPlayerProfile(p.playerId)}>
                           <td className="px-2 sm:px-4 py-4 text-center font-semibold text-gray-500">{index + 1}</td>
                           <td className="px-2 sm:px-4 py-4 min-w-[120px]">
                             <div className="flex items-center gap-2 sm:gap-3">
@@ -419,7 +432,7 @@ export const TournamentView = () => {
                         }
 
                         return (
-                          <tr key={row.playerId} className="hover:bg-gray-50 transition-colors">
+                          <tr key={row.playerId} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => openPlayerProfile(row.playerId)}>
                             <td className="px-2 sm:px-4 py-4 text-center font-semibold text-gray-700">
                               <div className="flex items-center justify-center gap-1">
                                 <span>{row.position}</span>
@@ -468,7 +481,7 @@ export const TournamentView = () => {
                    {historicalRanking.map((p, index) => {
                      const playerInfo = getPlayer(p.playerId);
                      return (
-                       <tr key={p.playerId} className="hover:bg-gray-50">
+                       <tr key={p.playerId} className="hover:bg-gray-50 cursor-pointer" onClick={() => openPlayerProfile(p.playerId)}>
                          <td className="px-2 sm:px-4 py-3 text-center font-semibold text-gray-500">{index + 1}</td>
                          <td className="px-2 sm:px-4 py-3 min-w-[120px]">
                            <div className="flex items-center gap-2 sm:gap-3">
@@ -545,10 +558,10 @@ export const TournamentView = () => {
                       
                       <div className="p-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
                         <div className="flex flex-col gap-1">
-                          <span className="font-medium text-green-700 text-sm flex items-center gap-1">
+                          <span className="font-medium text-green-700 text-sm flex items-center gap-1 cursor-pointer hover:underline" onClick={() => openPlayerProfile(m.winnerId)}>
                             <CheckCircle2 className="w-3 h-3" /> {winner?.name}
                           </span>
-                          <span className="text-gray-500 text-sm ml-4">{loser?.name}</span>
+                          <span className="text-gray-500 text-sm ml-4 cursor-pointer hover:underline" onClick={() => openPlayerProfile(m.loserId)}>{loser?.name}</span>
                         </div>
                         <div className="text-right">
                           <span className="font-bold text-gray-800 bg-gray-100 px-2 py-1 rounded text-sm tracking-widest">
@@ -586,9 +599,9 @@ export const TournamentView = () => {
                     <span className="text-xs font-bold text-yellow-600 uppercase tracking-wider block">
                       Temporada {sw.seasonNumber}
                     </span>
-                    <div className="flex items-center gap-2 mt-0.5">
+                    <div className="flex items-center gap-2 mt-0.5 cursor-pointer" onClick={() => openPlayerProfile((sw as any).winnerId)}>
                       <Avatar url={sw.winnerAvatar} name={sw.winnerName} size="sm" />
-                      <span className="font-bold text-gray-900 text-base">{sw.winnerName}</span>
+                      <span className="font-bold text-gray-900 text-base hover:underline">{sw.winnerName}</span>
                     </div>
                   </div>
                 </div>
@@ -601,6 +614,21 @@ export const TournamentView = () => {
           )}
         </div>
       )}
+
+      {/* MODAL: PERFIL DE JUGADOR */}
+      <PlayerModal
+        player={selectedPlayer}
+        isOpen={isPlayerModalOpen}
+        onClose={() => setIsPlayerModalOpen(false)}
+        onPlayerUpdated={(playerId, newAvatarUrl) => {
+          // Actualizamos al instante el avatar en el array de jugadores local en memoria
+          const playerObj = players.find(p => p.id === playerId);
+          if (playerObj) {
+            playerObj.avatarUrl = newAvatarUrl;
+          }
+          refreshDetail();
+        }}
+      />
 
       {/* MODAL: REGISTRO DE PARTIDO */}
       {showMatchModal && (
