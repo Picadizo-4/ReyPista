@@ -29,7 +29,7 @@ export const registerMatch = async (
   };
   batch.set(newMatchRef, newMatch);
 
-  // 2. Actualizar / Sumar estadísticas en seasonPlayers (Temporada actual)
+  // 2. Actualizar estadísticas en seasonPlayers (Temporada actual)
   const spQuery = query(
     collection(db, 'seasonPlayers'),
     where('tournamentId', '==', tournamentId),
@@ -54,7 +54,7 @@ export const registerMatch = async (
     }
   });
 
-  // 3. Actualizar / Sumar estadísticas en tournamentPlayers (Histórico global)
+  // 3. Actualizar estadísticas en tournamentPlayers (Histórico del Torneo)
   const tpQuery = query(
     collection(db, 'tournamentPlayers'),
     where('tournamentId', '==', tournamentId)
@@ -76,6 +76,21 @@ export const registerMatch = async (
         setsWon: increment(loserSets)
       });
     }
+  });
+
+  // 4. Actualizar estadísticas globales en la colección principal 'players' (Global Dashboard)
+  const winnerPlayerRef = doc(db, 'players', winnerId);
+  batch.update(winnerPlayerRef, {
+    totalPoints: increment(3),
+    totalMatches: increment(1),
+    totalSetsWon: increment(winnerSets)
+  });
+
+  const loserPlayerRef = doc(db, 'players', loserId);
+  batch.update(loserPlayerRef, {
+    totalPoints: increment(pointsAwardedLoser),
+    totalMatches: increment(1),
+    totalSetsWon: increment(loserSets)
   });
 
   await batch.commit();
@@ -121,7 +136,7 @@ export const deleteLastMatchService = async (tournamentId: string) => {
     }
   });
 
-  // 2. Revertir estadísticas en tournamentPlayers (Histórico)
+  // 2. Revertir estadísticas en tournamentPlayers (Histórico del Torneo)
   const tpQuery = query(
     collection(db, 'tournamentPlayers'),
     where('tournamentId', '==', tournamentId)
@@ -145,7 +160,22 @@ export const deleteLastMatchService = async (tournamentId: string) => {
     }
   });
 
-  // 3. Borrar el documento del partido
+  // 3. Revertir estadísticas globales en la colección principal 'players' (Global Dashboard)
+  const winnerPlayerRef = doc(db, 'players', lastMatch.winnerId);
+  batch.update(winnerPlayerRef, {
+    totalPoints: increment(-3),
+    totalMatches: increment(-1),
+    totalSetsWon: increment(-lastMatch.winnerSets)
+  });
+
+  const loserPlayerRef = doc(db, 'players', lastMatch.loserId);
+  batch.update(loserPlayerRef, {
+    totalPoints: increment(-(lastMatch.pointsAwardedLoser || 0)),
+    totalMatches: increment(-1),
+    totalSetsWon: increment(-lastMatch.loserSets)
+  });
+
+  // 4. Borrar el documento del partido
   batch.delete(doc(db, MATCHES_COLLECTION, lastMatch.id));
 
   await batch.commit();

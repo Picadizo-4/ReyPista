@@ -1,5 +1,5 @@
 // src/features/tournaments/TournamentView.tsx
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { Trophy, History, Swords, AlertCircle, Medal, CheckCircle2, X, Plus, RefreshCw, Settings, Award, Calendar, TrendingUp, TrendingDown, Minus, Trash2 } from 'lucide-react';
 import { useTournamentDetail } from './useTournamentDetail';
@@ -19,7 +19,7 @@ export const TournamentView = () => {
   const [showSeasonModal, setShowSeasonModal] = useState(false);
   const [showPunishmentModal, setShowPunishmentModal] = useState(false);
   const [showDeleteJornadaModal, setShowDeleteJornadaModal] = useState(false);
-  const [showDeleteMatchModal, setShowDeleteMatchModal] = useState(false); // <--- Estado para el modal de borrar partido
+  const [showDeleteMatchModal, setShowDeleteMatchModal] = useState(false);
 
   // Estados formularios
   const [winnerId, setWinnerId] = useState('');
@@ -33,7 +33,6 @@ export const TournamentView = () => {
   const [selectedSeasonForJornadas, setSelectedSeasonForJornadas] = useState<number>(1);
   const [selectedJornadaNumber, setSelectedJornadaNumber] = useState<number>(1);
 
-  // Declaraciones necesarias antes de los efectos para evitar errores de ámbito
   const jornadasGuardadas = (tournament as any)?.jornadas || [];
   const temporadasConJornadas = Array.from(new Set(jornadasGuardadas.map((j: any) => j.seasonNumber))) as number[];
   if (tournament?.currentSeasonNumber && !temporadasConJornadas.includes(tournament.currentSeasonNumber)) {
@@ -55,7 +54,6 @@ export const TournamentView = () => {
     }
   }, [tournament]);
 
-  // Auto-corregir la jornada seleccionada si la actual ya no existe (ej. al borrar la última)
   useEffect(() => {
     if (jornadasDeLaTemporadaSeleccionada.length > 0) {
       const exists = jornadasDeLaTemporadaSeleccionada.some((j: any) => j.jornadaNumber === selectedJornadaNumber);
@@ -174,7 +172,6 @@ export const TournamentView = () => {
     }
   };
 
-  // Función para manejar el borrado del último partido desde el modal personalizado
   const handleDeleteLatestMatch = async () => {
     try {
       await deleteLastMatch(tournament.id);
@@ -240,13 +237,6 @@ export const TournamentView = () => {
                 <Calendar className="w-4 h-4" /> Finalizar Jornada
               </button>
             </div>
-
-            <button 
-              onClick={() => setShowMatchModal(true)}
-              className="bg-gray-900 text-white px-4 py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-black flex items-center gap-2 shadow-sm transition-colors"
-            >
-              <Plus className="w-4 h-4" /> Registrar Partido
-            </button>
           </div>
 
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -301,12 +291,19 @@ export const TournamentView = () => {
             )}
           </div>
 
-          <div className="flex justify-center pt-2">
+          <div className="flex items-center justify-between gap-4 pt-2">
             <button
               onClick={() => setShowPunishmentModal(true)}
-              className="text-gray-600 bg-white border border-gray-200 px-4 py-2 rounded-xl text-xs font-semibold hover:bg-gray-50 flex items-center gap-1.5 transition-colors shadow-sm"
+              className="text-gray-600 bg-white border border-gray-200 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold hover:bg-gray-50 flex items-center gap-2 transition-colors shadow-sm"
             >
-              <Settings className="w-3.5 h-3.5 text-gray-400" /> Reasignar castigos
+              <Settings className="w-4 h-4 text-gray-400" /> Reasignar castigos
+            </button>
+
+            <button 
+              onClick={() => setShowMatchModal(true)}
+              className="bg-gray-900 text-white px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold hover:bg-black flex items-center gap-2 shadow-sm transition-colors"
+            >
+              <Plus className="w-4 h-4" /> Registrar Partido
             </button>
           </div>
         </div>
@@ -580,7 +577,7 @@ export const TournamentView = () => {
             </div>
           ) : (
             seasonWinners.map(sw => (
-              <div key={sw.seasonNumber} className="bg-white p-4 rounded-2xl shadow-sm border border-yellow-100 flex items-center justify-between">
+              <div key={`palmares-${sw.seasonNumber}`} className="bg-white p-4 rounded-2xl shadow-sm border border-yellow-100 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-yellow-50 flex items-center justify-center text-yellow-600 font-bold shrink-0">
                     <Trophy className="w-5 h-5" />
@@ -658,7 +655,7 @@ export const TournamentView = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Resultado (Sets)</label>
                 <div className="flex gap-2">
                   {possibleScores.map(score => (
-                    <label key={score.label} className={`flex-1 flex justify-center items-center py-3 px-3 rounded-xl border-2 cursor-pointer transition-all ${scoreObj === score.label ? 'border-blue-500 bg-blue-50 text-blue-700 font-bold' : 'border-gray-100 bg-white hover:border-gray-200 text-gray-600'}`}>
+                    <label key={`score-${score.label}`} className={`flex-1 flex justify-center items-center py-3 px-3 rounded-xl border-2 cursor-pointer transition-all ${scoreObj === score.label ? 'border-blue-500 bg-blue-50 text-blue-700 font-bold' : 'border-gray-100 bg-white hover:border-gray-200 text-gray-600'}`}>
                       <input type="radio" name="score" value={score.label} checked={scoreObj === score.label} onChange={() => setScoreObj(score.label)} className="sr-only" />
                       {score.label}
                     </label>

@@ -17,6 +17,7 @@ export const createTournament = async (
   punishmentSecondToLast: string | null,
   playerIds: string[]
 ): Promise<string> => {
+  const batch = writeBatch(db);
   const newTournamentRef = doc(collection(db, TOURNAMENTS_COLLECTION));
   
   const newTournament: Tournament = {
@@ -31,15 +32,68 @@ export const createTournament = async (
     playerIds
   };
 
-  await setDoc(newTournamentRef, newTournament);
+  // 1. Crear el torneo
+  batch.set(newTournamentRef, newTournament);
+
+  // 2. Inicializar los registros de los jugadores para este torneo (Temporada 1 y Histórico)
+  playerIds.forEach(playerId => {
+    // Inicializar Temporada 1
+    const seasonPlayerRef = doc(collection(db, 'seasonPlayers'));
+    batch.set(seasonPlayerRef, {
+      tournamentId: newTournamentRef.id,
+      seasonNumber: 1,
+      playerId,
+      points: 0,
+      matchesPlayed: 0,
+      setsWon: 0
+    });
+
+    // Inicializar Histórico del Torneo
+    const tournamentPlayerRef = doc(collection(db, 'tournamentPlayers'));
+    batch.set(tournamentPlayerRef, {
+      tournamentId: newTournamentRef.id,
+      playerId,
+      points: 0,
+      matchesPlayed: 0,
+      setsWon: 0
+    });
+  });
+
+  await batch.commit();
   return newTournamentRef.id;
 };
 
 export const advanceSeason = async (tournamentId: string): Promise<void> => {
+  // 1. Obtenemos el torneo para saber el número de la nueva temporada y los jugadores
   const tournamentRef = doc(db, TOURNAMENTS_COLLECTION, tournamentId);
-  await updateDoc(tournamentRef, {
-    currentSeasonNumber: increment(1)
+  const tournamentSnap = await getDoc(tournamentRef);
+  if (!tournamentSnap.exists()) throw new Error("Torneo no encontrado");
+
+  const tournamentData = tournamentSnap.data() as Tournament;
+  const nextSeasonNumber = (tournamentData.currentSeasonNumber || 1) + 1;
+  const playerIds = tournamentData.playerIds || [];
+
+  const batch = writeBatch(db);
+
+  // 2. Actualizamos el número de temporada actual en el torneo
+  batch.update(tournamentRef, {
+    currentSeasonNumber: nextSeasonNumber
   });
+
+  // 3. Creamos los registros de 'seasonPlayers' para la nueva temporada con puntos a 0
+  playerIds.forEach(playerId => {
+    const seasonPlayerRef = doc(collection(db, 'seasonPlayers'));
+    batch.set(seasonPlayerRef, {
+      tournamentId,
+      seasonNumber: nextSeasonNumber,
+      playerId,
+      points: 0,
+      matchesPlayed: 0,
+      setsWon: 0
+    });
+  });
+
+  await batch.commit();
 };
 
 export const removeTournamentData = async (tournamentId: string, removeGlobalPoints: boolean): Promise<void> => {
@@ -107,7 +161,6 @@ export const deleteLastJornada = async (tournamentId: string) => {
   const currentJornadas = data.jornadas || [];
   if (currentJornadas.length === 0) return;
 
-  // Ordenamos de forma segura por fecha o número para identificar la última absoluta
   currentJornadas.sort((a: any, b: any) => {
     if (a.seasonNumber !== b.seasonNumber) {
       return b.seasonNumber - a.seasonNumber;
@@ -115,10 +168,8 @@ export const deleteLastJornada = async (tournamentId: string) => {
     return b.jornadaNumber - a.jornadaNumber;
   });
 
-  // Eliminamos estrictamente el primer elemento tras ordenar (que es el más reciente de todos)
   currentJornadas.shift();
 
-  // Volvemos a ordenarlas cronológicamente para que se queden en orden correcto en la base de datos
   currentJornadas.sort((a: any, b: any) => {
     if (a.seasonNumber !== b.seasonNumber) {
       return a.seasonNumber - b.seasonNumber;

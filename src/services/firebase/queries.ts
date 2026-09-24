@@ -83,11 +83,13 @@ export interface PlayerStats {
   totalLosses: number;
   winRate: number;
   tournamentsWon: number;
+  currentStreak: number;    // Racha actual de victorias seguidas
+  maxStreak: number;        // Mejor racha histórica
   wonTournamentsList: { tournamentName: string; seasonNumber: number; points: number }[];
 }
 
 export const getPlayerDetailedStats = async (playerId: string): Promise<PlayerStats> => {
-  // 1. Obtener todos los partidos donde participó como ganador o perdedor
+  // 1. Obtener todos los partidos donde participó el jugador
   const matchesWinSnap = await getDocs(query(collection(db, 'matches'), where('winnerId', '==', playerId)));
   const matchesLossSnap = await getDocs(query(collection(db, 'matches'), where('loserId', '==', playerId)));
   
@@ -96,24 +98,61 @@ export const getPlayerDetailedStats = async (playerId: string): Promise<PlayerSt
   const totalMatches = totalWins + totalLosses;
   const winRate = totalMatches > 0 ? Math.round((totalWins / totalMatches) * 100) : 0;
 
-  // 2. Calcular torneos/temporadas ganadas buscando en seasonPlayers
+  // 2. Calcular rachas ordenando todos sus partidos cronológicamente
+  const allPlayerMatches: { date: number; isWin: boolean }[] = [];
+  
+  matchesWinSnap.docs.forEach(d => {
+    const data = d.data();
+    allPlayerMatches.push({ date: data.date || 0, isWin: true });
+  });
+  
+  matchesLossSnap.docs.forEach(d => {
+    const data = d.data();
+    allPlayerMatches.push({ date: data.date || 0, isWin: false });
+  });
+
+  // Ordenar de más antiguo a más reciente para calcular rachas correctamente
+  allPlayerMatches.sort((a, b) => a.date - b.date);
+
+  let currentStreak = 0;
+  let maxStreak = 0;
+  let tempStreak = 0;
+
+  for (const match of allPlayerMatches) {
+    if (match.isWin) {
+      tempStreak++;
+      if (tempStreak > maxStreak) {
+        maxStreak = tempStreak;
+      }
+    } else {
+      tempStreak = 0; // Se rompe la racha
+    }
+  }
+
+  // La racha actual se calcula mirando los partidos desde el final hacia atrás
+  currentStreak = 0;
+  for (let i = allPlayerMatches.length - 1; i >= 0; i--) {
+    if (allPlayerMatches[i].isWin) {
+      currentStreak++;
+    } else {
+      break; // En cuanto encuentra una derrota, se corta la racha actual
+    }
+  }
+
+  // 3. Calcular torneos/temporadas ganadas buscando en seasonPlayers
   const spSnap = await getDocs(query(collection(db, 'seasonPlayers'), where('playerId', '==', playerId)));
   const playerSeasonRecords = spSnap.docs.map(d => d.data() as SeasonPlayer);
 
-  // Necesitamos obtener todos los torneos para mapear sus nombres
   const tSnap = await getDocs(collection(db, 'tournaments'));
   const tournamentsMap = new Map<string, string>();
   tSnap.docs.forEach(d => tournamentsMap.set(d.id, d.data().name));
 
-  // Agrupamos por torneo y comprobamos si fue el que más puntos hizo en cada temporada cerrada o actual
   const wonTournamentsList: { tournamentName: string; seasonNumber: number; points: number }[] = [];
 
-  // Obtenemos todos los registros de seasonPlayers de esos torneos para ver quién ganó cada temporada
   for (const record of playerSeasonRecords) {
     const tId = record.tournamentId;
     const seasonNum = record.seasonNumber;
 
-    // Buscamos todos los jugadores en esa temporada de ese torneo
     const seasonQuery = await getDocs(query(
       collection(db, 'seasonPlayers'),
       where('tournamentId', '==', tId),
@@ -123,13 +162,8 @@ export const getPlayerDetailedStats = async (playerId: string): Promise<PlayerSt
     const seasonParticipants = seasonQuery.docs.map(d => d.data() as SeasonPlayer);
     if (seasonParticipants.length > 0) {
       seasonParticipants.sort((a, b) => b.points - a.points);
-      // Si este jugador es el que tiene más puntos en esta temporada
       if (seasonParticipants[0].playerId === playerId) {
-        // Solo lo añadimos si la temporada ya ha terminado (o si queremos contar líderes actuales, 
-        // filtramos preferiblemente temporadas pasadas o donde ya haya actividad consolidada).
-        // Para simplificar, añadimos los hitos donde vaya liderando o haya ganado.
         const tName = tournamentsMap.get(tId) || 'Torneo';
-        // Evitamos duplicar la misma temporada si ya se metió
         const exists = wonTournamentsList.some(item => item.tournamentName === tName && item.seasonNumber === seasonNum);
         if (!exists) {
           wonTournamentsList.push({
@@ -147,6 +181,8 @@ export const getPlayerDetailedStats = async (playerId: string): Promise<PlayerSt
     totalLosses,
     winRate,
     tournamentsWon: wonTournamentsList.length,
+    currentStreak,
+    maxStreak,
     wonTournamentsList
   };
 };

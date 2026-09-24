@@ -1,6 +1,6 @@
 // src/components/ui/PlayerModal.tsx
 import { useState, useEffect } from 'react';
-import { X, Trophy, Swords, Percent, Award } from 'lucide-react';
+import { X, Trophy, Swords, Percent, Award, Flame } from 'lucide-react';
 import { Avatar } from './Avatar';
 import { getPlayerDetailedStats, type PlayerStats } from '../../services/firebase/queries';
 import type { Player } from '../../core/types';
@@ -68,7 +68,7 @@ export const PlayerModal = ({ player, isOpen, onClose }: PlayerModalProps) => {
             <div className="py-8 text-center text-gray-400 text-sm animate-pulse">Calculando estadísticas...</div>
           ) : (
             <>
-              {/* Tarjetas de Métricas */}
+              {/* Tarjetas de Métricas Principales */}
               <div className="grid grid-cols-3 gap-3">
                 <div className="bg-gray-50 p-4 rounded-2xl text-center border border-gray-100">
                   <div className="flex justify-center mb-1 text-blue-600">
@@ -79,12 +79,12 @@ export const PlayerModal = ({ player, isOpen, onClose }: PlayerModalProps) => {
                 </div>
 
                 <div className="bg-gray-50 p-4 rounded-2xl text-center border border-gray-100">
-                <div className="flex justify-center mb-1 text-green-600">
+                  <div className="flex justify-center mb-1 text-green-600">
                     <Swords className="w-5 h-5" />
-                </div>
-                <span className="text-2xl font-extrabold text-gray-900 block">{stats?.totalWins || 0}</span>
-                <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wider block">Ganados</span>
-                <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wider block">Perdidos ({stats?.totalLosses || 0})</span>
+                  </div>
+                  <span className="text-2xl font-extrabold text-gray-900 block">{stats?.totalWins || 0}</span>
+                  <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wider block">Ganados</span>
+                  <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wider block">Perdidos ({stats?.totalLosses || 0})</span>
                 </div>
 
                 <div className="bg-gray-50 p-4 rounded-2xl text-center border border-gray-100">
@@ -93,6 +93,27 @@ export const PlayerModal = ({ player, isOpen, onClose }: PlayerModalProps) => {
                   </div>
                   <span className="text-2xl font-extrabold text-gray-900 block">{stats?.tournamentsWon || 0}</span>
                   <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wider">Títulos</span>
+                </div>
+              </div>
+
+              {/* Tarjetas de Rachas (Racha actual y Récord máximo) */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-orange-50/60 p-3.5 rounded-2xl text-center border border-orange-100 flex flex-col justify-center">
+                  <div className="flex items-center justify-center gap-1 text-orange-600 text-xs font-semibold mb-1">
+                    <Flame className="w-4 h-4 fill-orange-500 text-orange-500" /> Racha Actual
+                  </div>
+                  <span className="text-xl font-black text-orange-700">
+                    {stats?.currentStreak || 0} <span className="text-xs font-normal text-orange-600">victorias</span>
+                  </span>
+                </div>
+
+                <div className="bg-amber-50/60 p-3.5 rounded-2xl text-center border border-amber-100 flex flex-col justify-center">
+                  <div className="flex items-center justify-center gap-1 text-amber-600 text-xs font-semibold mb-1">
+                    🏆 Mejor Racha
+                  </div>
+                  <span className="text-xl font-black text-amber-700">
+                    {stats?.maxStreak || 0} <span className="text-xs font-normal text-amber-600">récord</span>
+                  </span>
                 </div>
               </div>
 
